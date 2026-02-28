@@ -439,11 +439,11 @@
       <div class="section-label">Business</div>
       <div class="form-group">
         <label>Business Name / CID</label>
-        <input type="text" id="biz-name" value="Joe's Coffee Roasters" placeholder="Search or enter CID…">
+        <input type="text" id="biz-name" value="" placeholder="e.g. Moxie Law Group">
       </div>
       <div class="form-group">
         <label>Keyword</label>
-        <input type="text" id="kw-input" value="coffee shop near me" placeholder="e.g. plumber near me">
+        <input type="text" id="kw-input" value="" placeholder="e.g. personal injury attorney">
       </div>
       <div class="form-group">
         <label>Platform</label>
@@ -773,29 +773,61 @@ function renderGrid() {
 
 // ── RUN SCAN ──
 let scanHistory = [];
+let currentBizLocation = null;
+
+async function geocodeBusiness(name) {
+  // Try Nominatim — search by business name
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(name)}&format=json&limit=1&addressdetails=1`;
+    const res = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+    const data = await res.json();
+    if (data && data.length > 0) {
+      return {
+        lat: parseFloat(data[0].lat),
+        lng: parseFloat(data[0].lon),
+        displayName: data[0].display_name
+      };
+    }
+  } catch(e) {}
+  return null;
+}
+
 async function runScan() {
   const btn = document.getElementById('scan-btn');
   const overlay = document.getElementById('scan-overlay');
   const statusText = document.getElementById('scan-status-text');
-  const bizName = document.getElementById('biz-name').value || 'Your Business';
-  const kw = document.getElementById('kw-input').value || 'keyword';
+  const bizName = document.getElementById('biz-name').value.trim() || 'Your Business';
+  const kw = document.getElementById('kw-input').value.trim() || 'keyword';
 
   btn.classList.add('scanning');
-  btn.textContent = 'Scanning…';
+  btn.innerHTML = 'Scanning…';
   overlay.classList.add('active');
 
-  const steps = [
-    'Locating business…',
-    `Resolving grid (${gridSize}×${gridSize})…`,
-    'Querying Google Local Pack…',
+  // Step 1: Geocode the business
+  statusText.textContent = `Locating "${bizName}"…`;
+  const location = await geocodeBusiness(bizName);
+
+  if (location) {
+    currentBizLocation = location;
+    statusText.textContent = 'Business found — centering map…';
+    map.flyTo([location.lat, location.lng], 13, { duration: 1.2 });
+    await sleep(1400); // wait for map to settle
+  } else {
+    statusText.textContent = 'Location not found — using map center…';
+    await sleep(600);
+  }
+
+  const scanSteps = [
+    `Resolving ${gridSize}×${gridSize} grid…`,
+    `Querying local pack for "${kw}"…`,
     'Processing ranking data…',
     'Calculating SoLV® score…',
     'Building geo-grid…'
   ];
 
-  for (let i = 0; i < steps.length; i++) {
-    statusText.textContent = steps[i];
-    await sleep(400 + Math.random() * 300);
+  for (const step of scanSteps) {
+    statusText.textContent = step;
+    await sleep(350 + Math.random() * 300);
   }
 
   // Generate results
@@ -817,27 +849,27 @@ async function runScan() {
   const credits = parseInt(document.getElementById('credit-count').textContent.replace(',',''));
   document.getElementById('credit-count').textContent = (credits - scanResults.length).toLocaleString();
 
-  // Competitors
-  renderCompetitors(bizName, solv);
+  // Competitors (keyword-aware)
+  renderCompetitors(bizName, kw, solv);
 
   overlay.classList.remove('active');
   btn.classList.remove('scanning');
   btn.innerHTML = `<svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:none;stroke:white;stroke-width:2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Run Scan`;
 
   renderGrid();
-  addScanHistory(bizName, kw, solv, avg);
+  addScanHistory(bizName, kw, solv, avg, location ? location.displayName : null);
 }
 
-function addScanHistory(biz, kw, solv, avg) {
+function addScanHistory(biz, kw, solv, avg, locationName) {
   const now = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
   const el = document.createElement('div');
-  el.style.cssText = `
-    padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer;
-  `;
+  el.style.cssText = `padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer;`;
+  const shortLoc = locationName ? locationName.split(',').slice(0,2).join(',') : '';
   el.innerHTML = `
     <div style="font-size:12px;font-weight:600;color:var(--text)">${biz}</div>
     <div style="font-size:11px;color:var(--muted);margin:2px 0">${kw}</div>
-    <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+    ${shortLoc ? `<div style="font-size:10px;color:var(--muted);margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${shortLoc}</div>` : ''}
+    <div style="display:flex;align-items:center;gap:8px;margin-top:3px">
       <span style="font-size:11px;color:#00c853;font-family:'DM Mono',monospace">SoLV: ${solv}%</span>
       <span style="font-size:11px;color:var(--muted)">·</span>
       <span style="font-size:11px;color:var(--muted);font-family:'DM Mono',monospace">Avg: ${avg}</span>
@@ -850,27 +882,56 @@ function addScanHistory(biz, kw, solv, avg) {
   hist.prepend(el);
 }
 
-function renderCompetitors(bizName, mySolv) {
+// Generate plausible competitor names based on keyword
+function competitorNamesForKeyword(kw) {
+  const k = kw.toLowerCase();
+  if (k.includes('law') || k.includes('attorney') || k.includes('legal')) {
+    return ['Smith & Associates Law', 'Peak Legal Group', 'The Law Offices of R. Clark', 'Apex Trial Attorneys'];
+  } else if (k.includes('plumb')) {
+    return ['ProFlow Plumbing', 'City Plumbers Inc.', 'QuickFix Plumbing', 'AquaPro Services'];
+  } else if (k.includes('dentist') || k.includes('dental')) {
+    return ['Bright Smile Dental', 'City Dental Care', 'Premier Dental Group', 'Family Dentistry Plus'];
+  } else if (k.includes('restaurant') || k.includes('food') || k.includes('eat')) {
+    return ['The Corner Bistro', 'Urban Kitchen', 'Main Street Eats', 'Harvest Table'];
+  } else if (k.includes('coffee') || k.includes('café') || k.includes('cafe')) {
+    return ['The Grind Coffee Co.', 'Brew & Bloom', 'Morning Rush Café', 'Café Aroma'];
+  } else if (k.includes('gym') || k.includes('fitness')) {
+    return ['Iron Core Fitness', 'Elevate Gym', 'Peak Performance Studio', 'FitLife Club'];
+  } else if (k.includes('real estate') || k.includes('realtor')) {
+    return ['Premier Realty Group', 'HomeKey Partners', 'Atlas Real Estate', 'Summit Properties'];
+  } else {
+    // Generic business-y names
+    return ['ProServe Group', 'City Services Co.', 'Premier Solutions', 'Apex Local Business'];
+  }
+}
+
+function renderCompetitors(bizName, kw, mySolv) {
+  const compNames = competitorNamesForKeyword(kw);
   const competitors = [
-    { name: bizName, solv: mySolv, rank: Math.round(1 + (100-mySolv)/30) },
-    { name: 'The Grind Coffee Co.', solv: Math.round(Math.random()*30+20), rank: null },
-    { name: 'Brew & Bloom', solv: Math.round(Math.random()*25+10), rank: null },
-    { name: 'Morning Rush Café', solv: Math.round(Math.random()*20+5), rank: null },
-    { name: 'Café Aroma', solv: Math.round(Math.random()*15+3), rank: null },
+    { name: bizName, solv: mySolv },
+    { name: compNames[0], solv: Math.round(Math.random()*30+20) },
+    { name: compNames[1], solv: Math.round(Math.random()*25+10) },
+    { name: compNames[2], solv: Math.round(Math.random()*20+5) },
+    { name: compNames[3], solv: Math.round(Math.random()*15+3) },
   ].sort((a,b) => b.solv - a.solv).map((c, i) => ({ ...c, rank: i+1 }));
 
+  const myRank = competitors.findIndex(c => c.name === bizName);
+
   const list = document.getElementById('comp-list');
-  list.innerHTML = competitors.map((c, i) => `
-    <div class="comp-item">
-      <div class="comp-rank-badge" style="background:${rankColor(Math.min(i+1, 5))};${i>=3?'color:white':''}">
-        ${c.rank}
+  list.innerHTML = competitors.map((c, i) => {
+    const isYou = c.name === bizName;
+    return `
+      <div class="comp-item">
+        <div class="comp-rank-badge" style="background:${rankColor(Math.min(i+1, 5))};${i>=3?'color:white':''}">
+          ${c.rank}
+        </div>
+        <div class="comp-name" style="${isYou?'color:#00c853;font-weight:600':''}">
+          ${c.name}${isYou?' ★':''}
+        </div>
+        <div class="comp-solv">${c.solv}%</div>
       </div>
-      <div class="comp-name" style="${i===0?'color:#00c853;font-weight:600':''}">
-        ${c.name}${i===0?' ★':''}
-      </div>
-      <div class="comp-solv">${c.solv}%</div>
-    </div>
-  `).join('');
+    `;
+  }).join('');
 }
 
 function setTab(tab) {

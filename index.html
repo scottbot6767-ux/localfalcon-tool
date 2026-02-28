@@ -442,6 +442,10 @@
         <input type="text" id="biz-name" value="" placeholder="e.g. Moxie Law Group">
       </div>
       <div class="form-group">
+        <label>City, State</label>
+        <input type="text" id="biz-location" value="" placeholder="e.g. Salt Lake City, UT">
+      </div>
+      <div class="form-group">
         <label>Keyword</label>
         <input type="text" id="kw-input" value="" placeholder="e.g. personal injury attorney">
       </div>
@@ -775,20 +779,39 @@ function renderGrid() {
 let scanHistory = [];
 let currentBizLocation = null;
 
-async function geocodeBusiness(name) {
-  // Try Nominatim — search by business name
+async function geocodeBusiness(bizName, cityState) {
+  // Strategy 1: try "Business Name, City State" combo
+  if (cityState && cityState.trim()) {
+    try {
+      const q = encodeURIComponent(`${bizName}, ${cityState}`);
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1&addressdetails=1`);
+      const data = await res.json();
+      if (data && data.length > 0) {
+        return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon), displayName: data[0].display_name };
+      }
+    } catch(e) {}
+
+    // Strategy 2: just geocode the city/state — most reliable
+    try {
+      const q = encodeURIComponent(cityState.trim());
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1&addressdetails=1`);
+      const data = await res.json();
+      if (data && data.length > 0) {
+        return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon), displayName: data[0].display_name };
+      }
+    } catch(e) {}
+  }
+
+  // Strategy 3: try just the business name in OSM (works for large/known chains)
   try {
-    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(name)}&format=json&limit=1&addressdetails=1`;
-    const res = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+    const q = encodeURIComponent(bizName);
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1&addressdetails=1`);
     const data = await res.json();
     if (data && data.length > 0) {
-      return {
-        lat: parseFloat(data[0].lat),
-        lng: parseFloat(data[0].lon),
-        displayName: data[0].display_name
-      };
+      return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon), displayName: data[0].display_name };
     }
   } catch(e) {}
+
   return null;
 }
 
@@ -797,24 +820,29 @@ async function runScan() {
   const overlay = document.getElementById('scan-overlay');
   const statusText = document.getElementById('scan-status-text');
   const bizName = document.getElementById('biz-name').value.trim() || 'Your Business';
+  const cityState = document.getElementById('biz-location').value.trim();
   const kw = document.getElementById('kw-input').value.trim() || 'keyword';
 
   btn.classList.add('scanning');
   btn.innerHTML = 'Scanning…';
   overlay.classList.add('active');
 
-  // Step 1: Geocode the business
+  // Step 1: Geocode the business / location
   statusText.textContent = `Locating "${bizName}"…`;
-  const location = await geocodeBusiness(bizName);
+  const location = await geocodeBusiness(bizName, cityState);
 
   if (location) {
     currentBizLocation = location;
-    statusText.textContent = 'Business found — centering map…';
-    map.flyTo([location.lat, location.lng], 13, { duration: 1.2 });
-    await sleep(1400); // wait for map to settle
+    statusText.textContent = 'Found — moving map…';
+    map.flyTo([location.lat, location.lng], 13, { animate: false });
+    await sleep(300);
   } else {
-    statusText.textContent = 'Location not found — using map center…';
-    await sleep(600);
+    statusText.textContent = 'Location not found — add a City, State above';
+    await sleep(1200);
+    overlay.classList.remove('active');
+    btn.classList.remove('scanning');
+    btn.innerHTML = `<svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:none;stroke:white;stroke-width:2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Run Scan`;
+    return;
   }
 
   const scanSteps = [

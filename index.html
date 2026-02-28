@@ -1,0 +1,890 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Local Falcon — Geo-Grid Rank Tracker</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0e1117;
+    --surface: #161b26;
+    --surface2: #1e2535;
+    --border: #2a3348;
+    --text: #e8eaf0;
+    --muted: #7a8499;
+    --accent: #3b82f6;
+    --accent-hover: #2563eb;
+
+    /* ranking colors */
+    --r1: #00c853;
+    --r2: #69f0ae;
+    --r3: #b9f6ca;
+    --r4: #fff176;
+    --r5: #ffd600;
+    --r6: #ffab40;
+    --r7: #ff6d00;
+    --r8: #f4511e;
+    --r9: #b71c1c;
+    --r20: #3a3f52;
+  }
+
+  html, body { height: 100%; font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); overflow: hidden; }
+
+  /* ── TOP NAV ── */
+  .topnav {
+    height: 52px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    gap: 24px;
+    position: relative;
+    z-index: 1000;
+  }
+  .logo {
+    display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; letter-spacing: -0.3px;
+  }
+  .logo-icon {
+    width: 28px; height: 28px;
+    background: var(--accent);
+    border-radius: 6px;
+    display: grid; place-items: center;
+  }
+  .logo-icon svg { width: 16px; height: 16px; fill: white; }
+  .nav-links { display: flex; gap: 4px; margin-left: 12px; }
+  .nav-links a {
+    font-size: 13px; color: var(--muted); text-decoration: none;
+    padding: 5px 10px; border-radius: 5px; transition: all 0.15s;
+  }
+  .nav-links a:hover { color: var(--text); background: var(--surface2); }
+  .nav-links a.active { color: var(--text); background: var(--surface2); }
+  .nav-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+  .credits-pill {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 20px; padding: 4px 12px;
+    font-size: 12px; font-family: 'DM Mono', monospace;
+    color: var(--muted);
+  }
+  .credits-pill span { color: var(--accent); font-weight: 600; }
+  .avatar {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+    display: grid; place-items: center; font-size: 12px; font-weight: 600; color: white;
+  }
+
+  /* ── LAYOUT ── */
+  .app-body {
+    display: flex;
+    height: calc(100vh - 52px);
+  }
+
+  /* ── SIDEBAR ── */
+  .sidebar {
+    width: 300px;
+    min-width: 300px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .sidebar::-webkit-scrollbar { width: 4px; }
+  .sidebar::-webkit-scrollbar-track { background: transparent; }
+  .sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .sidebar-section {
+    padding: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar-section:last-child { border-bottom: none; }
+
+  .section-label {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--muted);
+    margin-bottom: 12px;
+  }
+
+  .form-group { margin-bottom: 12px; }
+  .form-group label {
+    display: block; font-size: 12px; color: var(--muted);
+    margin-bottom: 5px; font-weight: 500;
+  }
+  .form-group input, .form-group select {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    padding: 8px 10px;
+    outline: none;
+    transition: border-color 0.15s;
+    appearance: none;
+  }
+  .form-group input:focus, .form-group select:focus {
+    border-color: var(--accent);
+  }
+  .form-group select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237a8499' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    padding-right: 30px;
+  }
+
+  .grid-size-picker {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 5px;
+  }
+  .grid-size-btn {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    padding: 5px 2px;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.15s;
+  }
+  .grid-size-btn:hover { border-color: var(--accent); color: var(--text); }
+  .grid-size-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+    font-weight: 600;
+  }
+
+  .radius-row {
+    display: flex; align-items: center; gap: 10px;
+  }
+  .radius-row input[type="range"] {
+    flex: 1; height: 3px; padding: 0; border: none;
+    background: var(--border); border-radius: 2px;
+    accent-color: var(--accent); cursor: pointer;
+  }
+  .radius-val {
+    font-family: 'DM Mono', monospace; font-size: 12px;
+    color: var(--accent); min-width: 48px; text-align: right;
+  }
+
+  .toggle-row {
+    display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;
+  }
+  .toggle-row label { font-size: 12px; color: var(--muted); }
+  .toggle {
+    position: relative; width: 34px; height: 18px;
+  }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .toggle-slider {
+    position: absolute; inset: 0;
+    background: var(--border); border-radius: 18px; cursor: pointer;
+    transition: background 0.2s;
+  }
+  .toggle-slider::before {
+    content: ''; position: absolute;
+    width: 12px; height: 12px; border-radius: 50%;
+    background: white; top: 3px; left: 3px;
+    transition: transform 0.2s;
+  }
+  .toggle input:checked + .toggle-slider { background: var(--accent); }
+  .toggle input:checked + .toggle-slider::before { transform: translateX(16px); }
+
+  .scan-btn {
+    width: 100%;
+    background: var(--accent);
+    border: none;
+    border-radius: 8px;
+    color: white;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 11px;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.1s;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+  }
+  .scan-btn:hover { background: var(--accent-hover); }
+  .scan-btn:active { transform: scale(0.98); }
+  .scan-btn.scanning {
+    background: #2563eb;
+    cursor: wait;
+  }
+  .scan-btn svg { width: 16px; height: 16px; fill: white; }
+
+  /* ── MAIN AREA ── */
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* ── STATS BAR ── */
+  .stats-bar {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 20px;
+    display: flex; align-items: center; gap: 0;
+  }
+  .stat-item {
+    flex: 1;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 0 16px;
+    border-right: 1px solid var(--border);
+  }
+  .stat-item:last-child { border-right: none; }
+  .stat-val {
+    font-size: 24px; font-weight: 700; letter-spacing: -0.5px;
+    font-family: 'DM Mono', monospace;
+  }
+  .stat-val.green { color: var(--r1); }
+  .stat-val.yellow { color: var(--r5); }
+  .stat-val.blue { color: var(--accent); }
+  .stat-label { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+  /* ── MAP CONTAINER ── */
+  .map-wrap {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+  }
+  #map {
+    width: 100%; height: 100%;
+  }
+  /* dark map tile filter */
+  .leaflet-tile { filter: brightness(0.55) saturate(0.6) hue-rotate(200deg); }
+  .leaflet-container { background: #0d1218; }
+
+  /* ── GEO GRID OVERLAY ── */
+  #grid-overlay {
+    position: absolute; inset: 0; pointer-events: none; z-index: 400;
+  }
+
+  .grid-node {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    font-weight: 700;
+    color: #000;
+    cursor: pointer;
+    pointer-events: all;
+    transition: transform 0.15s;
+    border: 2px solid rgba(255,255,255,0.2);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+  }
+  .grid-node:hover { transform: translate(-50%, -50%) scale(1.2); z-index: 500; }
+  .grid-node.rank-1 { background: #00c853; }
+  .grid-node.rank-2 { background: #00e676; }
+  .grid-node.rank-3 { background: #69f0ae; }
+  .grid-node.rank-4 { background: #b9f6ca; }
+  .grid-node.rank-5 { background: #fff176; }
+  .grid-node.rank-6 { background: #ffd600; }
+  .grid-node.rank-7 { background: #ffab40; }
+  .grid-node.rank-8 { background: #ff6d00; color: white; }
+  .grid-node.rank-9 { background: #f4511e; color: white; }
+  .grid-node.rank-20 { background: #3a3f52; color: #7a8499; }
+  .grid-node.center-marker { border: 3px solid white; z-index: 450; }
+  .grid-node.center-marker::after {
+    content: '';
+    position: absolute;
+    bottom: -10px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 2px; height: 8px;
+    background: white;
+    opacity: 0.5;
+  }
+
+  /* tooltip */
+  .node-tooltip {
+    position: absolute;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 12px;
+    pointer-events: none;
+    z-index: 1000;
+    min-width: 160px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    display: none;
+  }
+  .node-tooltip.visible { display: block; }
+  .node-tooltip .tt-rank { font-size: 22px; font-weight: 700; font-family: 'DM Mono', monospace; }
+  .node-tooltip .tt-label { color: var(--muted); font-size: 11px; margin-bottom: 6px; }
+  .node-tooltip .tt-biz { font-weight: 600; margin-bottom: 2px; }
+  .node-tooltip .tt-kw { color: var(--muted); font-size: 11px; }
+
+  /* ── LEGEND ── */
+  .legend {
+    position: absolute; bottom: 20px; left: 20px; z-index: 500;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 16px;
+    font-size: 11px;
+  }
+  .legend-title { font-weight: 600; color: var(--muted); margin-bottom: 8px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .legend-items { display: flex; gap: 6px; }
+  .legend-item { display: flex; align-items: center; gap: 5px; }
+  .legend-dot { width: 14px; height: 14px; border-radius: 50%; }
+
+  /* ── COMPETITOR PANEL ── */
+  .comp-panel {
+    position: absolute; right: 20px; top: 20px; z-index: 500;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    width: 220px;
+    font-size: 12px;
+  }
+  .comp-panel-title { font-weight: 600; color: var(--muted); margin-bottom: 10px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .comp-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+  }
+  .comp-item:last-child { border-bottom: none; }
+  .comp-rank-badge {
+    width: 24px; height: 24px; border-radius: 50%;
+    display: grid; place-items: center;
+    font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 700;
+    color: #000; flex-shrink: 0;
+  }
+  .comp-name { flex: 1; font-size: 12px; color: var(--text); }
+  .comp-solv { font-family: 'DM Mono', monospace; font-size: 11px; color: var(--muted); }
+
+  /* ── LOADING ── */
+  .scan-overlay {
+    position: absolute; inset: 0; z-index: 600;
+    background: rgba(14,17,23,0.8);
+    display: none; place-items: center; flex-direction: column; gap: 16px;
+  }
+  .scan-overlay.active { display: grid; }
+  .scan-pulse {
+    width: 60px; height: 60px; border-radius: 50%;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .scan-text { color: var(--muted); font-size: 13px; }
+
+  /* ── TABS ── */
+  .map-tabs {
+    position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+    z-index: 500; display: flex; gap: 4px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px; padding: 3px;
+  }
+  .map-tab {
+    font-size: 12px; padding: 5px 14px; border-radius: 5px;
+    cursor: pointer; transition: all 0.15s; color: var(--muted);
+    border: none; background: none; font-family: 'DM Sans', sans-serif;
+  }
+  .map-tab.active { background: var(--surface2); color: var(--text); font-weight: 600; }
+
+  /* solv ring */
+  .solv-ring {
+    position: relative; width: 50px; height: 50px;
+  }
+  .solv-ring svg { position: absolute; inset: 0; }
+  .solv-ring .val {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; font-family: 'DM Mono', monospace;
+  }
+</style>
+</head>
+<body>
+
+<!-- TOP NAV -->
+<nav class="topnav">
+  <div class="logo">
+    <div class="logo-icon">
+      <svg viewBox="0 0 24 24"><path d="M22 7l-9.1 9.1-5-5L1 18M22 7h-7M22 7v7"/></svg>
+    </div>
+    Local Falcon
+  </div>
+  <nav class="nav-links">
+    <a href="#" class="active">Scans</a>
+    <a href="#">Campaigns</a>
+    <a href="#">Locations</a>
+    <a href="#">Keywords</a>
+    <a href="#">Reports</a>
+  </nav>
+  <div class="nav-right">
+    <div class="credits-pill">Credits: <span id="credit-count">1,240</span></div>
+    <div class="avatar">SW</div>
+  </div>
+</nav>
+
+<div class="app-body">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+
+    <div class="sidebar-section">
+      <div class="section-label">Business</div>
+      <div class="form-group">
+        <label>Business Name / CID</label>
+        <input type="text" id="biz-name" value="Joe's Coffee Roasters" placeholder="Search or enter CID…">
+      </div>
+      <div class="form-group">
+        <label>Keyword</label>
+        <input type="text" id="kw-input" value="coffee shop near me" placeholder="e.g. plumber near me">
+      </div>
+      <div class="form-group">
+        <label>Platform</label>
+        <select id="platform">
+          <option>Google Business Profile</option>
+          <option>Apple Business Connect</option>
+          <option>Google AI Overviews</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="section-label">Grid Configuration</div>
+      <div class="form-group">
+        <label>Grid Size</label>
+        <div class="grid-size-picker">
+          <div class="grid-size-btn" data-size="3">3×3</div>
+          <div class="grid-size-btn" data-size="5">5×5</div>
+          <div class="grid-size-btn active" data-size="7">7×7</div>
+          <div class="grid-size-btn" data-size="9">9×9</div>
+          <div class="grid-size-btn" data-size="11">11×11</div>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Point Spacing (radius)</label>
+        <div class="radius-row">
+          <input type="range" id="radius-slider" min="0.1" max="5" step="0.1" value="1.0">
+          <div class="radius-val" id="radius-val">1.0 mi</div>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Max Rank Shown</label>
+        <select>
+          <option>20 (default)</option>
+          <option>10</option>
+          <option>15</option>
+          <option>25</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="section-label">Options</div>
+      <div class="toggle-row">
+        <label>Show Competitors</label>
+        <label class="toggle">
+          <input type="checkbox" id="show-comp" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="toggle-row">
+        <label>Show Ranking Lines</label>
+        <label class="toggle">
+          <input type="checkbox">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="toggle-row">
+        <label>Center on Business</label>
+        <label class="toggle">
+          <input type="checkbox" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="section-label">Schedule</div>
+      <div class="form-group">
+        <label>Frequency</label>
+        <select>
+          <option>One-time scan</option>
+          <option>Daily</option>
+          <option>Weekly</option>
+          <option>Monthly</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <button class="scan-btn" id="scan-btn" onclick="runScan()">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        Run Scan
+      </button>
+    </div>
+
+    <!-- SCAN HISTORY -->
+    <div class="sidebar-section">
+      <div class="section-label">Recent Scans</div>
+      <div id="scan-history">
+        <div style="color:var(--muted);font-size:12px;text-align:center;padding:12px 0">
+          No scans yet. Run your first scan above.
+        </div>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- MAIN MAP AREA -->
+  <main class="main">
+
+    <!-- STATS BAR -->
+    <div class="stats-bar">
+      <div class="stat-item">
+        <div class="stat-val green" id="stat-solv">—</div>
+        <div class="stat-label">SoLV® Score</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-val yellow" id="stat-avg">—</div>
+        <div class="stat-label">Avg. Ranking</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-val blue" id="stat-top3">—</div>
+        <div class="stat-label">Top 3 Positions</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-val" id="stat-grid">0</div>
+        <div class="stat-label">Grid Points</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-val" id="stat-kw" style="font-size:13px;font-family:'DM Sans',sans-serif;color:var(--muted)">—</div>
+        <div class="stat-label">Keyword</div>
+      </div>
+    </div>
+
+    <!-- MAP WRAP -->
+    <div class="map-wrap">
+      <div id="map"></div>
+      <div id="grid-overlay"></div>
+
+      <!-- TABS -->
+      <div class="map-tabs">
+        <button class="map-tab active" onclick="setTab('grid')">Geo-Grid</button>
+        <button class="map-tab" onclick="setTab('competitor')">Competitors</button>
+        <button class="map-tab" onclick="setTab('trend')">Trend</button>
+      </div>
+
+      <!-- LOADING OVERLAY -->
+      <div class="scan-overlay" id="scan-overlay">
+        <div class="scan-pulse"></div>
+        <div class="scan-text" id="scan-status-text">Initializing scan…</div>
+      </div>
+
+      <!-- LEGEND -->
+      <div class="legend">
+        <div class="legend-title">Rankings</div>
+        <div class="legend-items">
+          <div class="legend-item"><div class="legend-dot" style="background:#00c853"></div><span style="color:var(--muted)">1</span></div>
+          <div class="legend-item"><div class="legend-dot" style="background:#69f0ae"></div><span style="color:var(--muted)">2–3</span></div>
+          <div class="legend-item"><div class="legend-dot" style="background:#fff176"></div><span style="color:var(--muted)">4–5</span></div>
+          <div class="legend-item"><div class="legend-dot" style="background:#ffd600"></div><span style="color:var(--muted)">6–7</span></div>
+          <div class="legend-item"><div class="legend-dot" style="background:#ff6d00"></div><span style="color:var(--muted)">8–10</span></div>
+          <div class="legend-item"><div class="legend-dot" style="background:#f4511e"></div><span style="color:var(--muted)">11–15</span></div>
+          <div class="legend-item"><div class="legend-dot" style="background:#3a3f52"></div><span style="color:var(--muted)">20+</span></div>
+        </div>
+      </div>
+
+      <!-- COMPETITOR PANEL -->
+      <div class="comp-panel" id="comp-panel">
+        <div class="comp-panel-title">Top Competitors</div>
+        <div id="comp-list">
+          <div style="color:var(--muted);font-size:11px">Run a scan to see competitors</div>
+        </div>
+      </div>
+
+      <!-- TOOLTIP -->
+      <div class="node-tooltip" id="node-tooltip"></div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+// ── MAP INIT ──
+const map = L.map('map', {
+  center: [40.7580, -73.9855],
+  zoom: 13,
+  zoomControl: false,
+  attributionControl: false
+});
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  attribution: ''
+}).addTo(map);
+L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+// State
+let gridSize = 7;
+let scanResults = [];
+let currentTab = 'grid';
+
+// ── GRID SIZE PICKER ──
+document.querySelectorAll('.grid-size-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.grid-size-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    gridSize = parseInt(btn.dataset.size);
+  });
+});
+
+// ── RADIUS SLIDER ──
+const radiusSlider = document.getElementById('radius-slider');
+const radiusVal = document.getElementById('radius-val');
+radiusSlider.addEventListener('input', () => {
+  radiusVal.textContent = parseFloat(radiusSlider.value).toFixed(1) + ' mi';
+});
+
+// ── RANK → COLOR CLASS ──
+function rankClass(r) {
+  if (r === 1) return 'rank-1';
+  if (r === 2) return 'rank-2';
+  if (r === 3) return 'rank-3';
+  if (r === 4) return 'rank-4';
+  if (r <= 6) return 'rank-5';
+  if (r <= 8) return 'rank-6';
+  if (r <= 10) return 'rank-7';
+  if (r <= 13) return 'rank-8';
+  if (r <= 19) return 'rank-9';
+  return 'rank-20';
+}
+
+function rankColor(r) {
+  const cls = rankClass(r);
+  const map = {
+    'rank-1':'#00c853','rank-2':'#00e676','rank-3':'#69f0ae',
+    'rank-4':'#b9f6ca','rank-5':'#ffd600','rank-6':'#ffab40',
+    'rank-7':'#ff6d00','rank-8':'#f4511e','rank-9':'#b71c1c',
+    'rank-20':'#3a3f52'
+  };
+  return map[cls] || '#3a3f52';
+}
+
+// ── SIMULATE REALISTIC RANKING DATA ──
+function generateRankings(size) {
+  const total = size * size;
+  const center = Math.floor(size / 2);
+  const results = [];
+  for (let row = 0; row < size; row++) {
+    for (let col = 0; col < size; col++) {
+      const distFromCenter = Math.sqrt((row - center)**2 + (col - center)**2);
+      const maxDist = Math.sqrt(2) * center;
+      const normalizedDist = distFromCenter / maxDist;
+      // center tends to rank better, edges worse
+      const baseMean = 1 + normalizedDist * 14;
+      const noise = (Math.random() - 0.5) * 6;
+      let rank = Math.round(baseMean + noise);
+      rank = Math.max(1, Math.min(20, rank));
+      // occasionally 20+
+      if (Math.random() < 0.08 && normalizedDist > 0.5) rank = 20;
+      results.push({ row, col, rank });
+    }
+  }
+  return results;
+}
+
+// ── GEOGRAPHIC GRID POSITIONS ──
+function gridLatLngs(centerLat, centerLng, size, radiusMi) {
+  const miPerDeg = 69.0;
+  const spacing = radiusMi / miPerDeg;
+  const half = Math.floor(size / 2);
+  const pts = [];
+  for (let r = 0; r < size; r++) {
+    for (let c = 0; c < size; c++) {
+      const latOff = (half - r) * spacing;
+      const lngOff = (c - half) * spacing / Math.cos(centerLat * Math.PI / 180);
+      pts.push({ lat: centerLat + latOff, lng: centerLng + lngOff, row: r, col: c });
+    }
+  }
+  return pts;
+}
+
+// ── PROJECT LAT/LNG → PIXEL (overlay) ──
+function latLngToOverlay(lat, lng) {
+  const pt = map.latLngToContainerPoint([lat, lng]);
+  return { x: pt.x, y: pt.y };
+}
+
+// ── RENDER GRID ──
+function renderGrid() {
+  const overlay = document.getElementById('grid-overlay');
+  overlay.innerHTML = '';
+
+  const centerLat = map.getCenter().lat;
+  const centerLng = map.getCenter().lng;
+  const radius = parseFloat(radiusSlider.value);
+  const positions = gridLatLngs(centerLat, centerLng, gridSize, radius);
+  const tooltip = document.getElementById('node-tooltip');
+  const bizName = document.getElementById('biz-name').value || 'Your Business';
+  const kw = document.getElementById('kw-input').value || 'keyword';
+
+  positions.forEach((pos, i) => {
+    const result = scanResults[i] || { rank: 20 };
+    const { x, y } = latLngToOverlay(pos.lat, pos.lng);
+    const isCenter = pos.row === Math.floor(gridSize/2) && pos.col === Math.floor(gridSize/2);
+
+    const node = document.createElement('div');
+    node.className = `grid-node ${rankClass(result.rank)}${isCenter ? ' center-marker' : ''}`;
+    node.style.left = x + 'px';
+    node.style.top = y + 'px';
+    node.style.width = node.style.height = (gridSize > 9 ? '28px' : '36px');
+    node.style.fontSize = (gridSize > 9 ? '10px' : '12px');
+    node.textContent = result.rank === 20 ? '20+' : `#${result.rank}`;
+
+    node.addEventListener('mouseenter', (e) => {
+      const rect = document.querySelector('.map-wrap').getBoundingClientRect();
+      tooltip.className = 'node-tooltip visible';
+      tooltip.innerHTML = `
+        <div class="tt-rank" style="color:${rankColor(result.rank)}">#${result.rank === 20 ? '20+' : result.rank}</div>
+        <div class="tt-label">Local Pack Position</div>
+        <div class="tt-biz">${bizName}</div>
+        <div class="tt-kw">${kw}</div>
+        <div style="margin-top:8px;font-size:10px;color:var(--muted)">${pos.lat.toFixed(4)}, ${pos.lng.toFixed(4)}</div>
+      `;
+      let tx = x + 20;
+      let ty = y - 20;
+      if (tx + 160 > rect.width) tx = x - 180;
+      tooltip.style.left = tx + 'px';
+      tooltip.style.top = ty + 'px';
+    });
+    node.addEventListener('mouseleave', () => {
+      tooltip.className = 'node-tooltip';
+    });
+
+    overlay.appendChild(node);
+  });
+}
+
+// ── RUN SCAN ──
+let scanHistory = [];
+async function runScan() {
+  const btn = document.getElementById('scan-btn');
+  const overlay = document.getElementById('scan-overlay');
+  const statusText = document.getElementById('scan-status-text');
+  const bizName = document.getElementById('biz-name').value || 'Your Business';
+  const kw = document.getElementById('kw-input').value || 'keyword';
+
+  btn.classList.add('scanning');
+  btn.textContent = 'Scanning…';
+  overlay.classList.add('active');
+
+  const steps = [
+    'Locating business…',
+    `Resolving grid (${gridSize}×${gridSize})…`,
+    'Querying Google Local Pack…',
+    'Processing ranking data…',
+    'Calculating SoLV® score…',
+    'Building geo-grid…'
+  ];
+
+  for (let i = 0; i < steps.length; i++) {
+    statusText.textContent = steps[i];
+    await sleep(400 + Math.random() * 300);
+  }
+
+  // Generate results
+  scanResults = generateRankings(gridSize);
+
+  // Calc stats
+  const ranks = scanResults.map(r => r.rank === 20 ? 21 : r.rank);
+  const avg = (ranks.reduce((a,b) => a+b,0) / ranks.length).toFixed(1);
+  const top3 = scanResults.filter(r => r.rank <= 3).length;
+  const solv = Math.round((top3 / scanResults.length) * 100);
+
+  document.getElementById('stat-solv').textContent = solv + '%';
+  document.getElementById('stat-avg').textContent = '#' + avg;
+  document.getElementById('stat-top3').textContent = top3 + '/' + scanResults.length;
+  document.getElementById('stat-grid').textContent = scanResults.length;
+  document.getElementById('stat-kw').textContent = kw;
+
+  // Credits
+  const credits = parseInt(document.getElementById('credit-count').textContent.replace(',',''));
+  document.getElementById('credit-count').textContent = (credits - scanResults.length).toLocaleString();
+
+  // Competitors
+  renderCompetitors(bizName, solv);
+
+  overlay.classList.remove('active');
+  btn.classList.remove('scanning');
+  btn.innerHTML = `<svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:none;stroke:white;stroke-width:2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Run Scan`;
+
+  renderGrid();
+  addScanHistory(bizName, kw, solv, avg);
+}
+
+function addScanHistory(biz, kw, solv, avg) {
+  const now = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+  const el = document.createElement('div');
+  el.style.cssText = `
+    padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer;
+  `;
+  el.innerHTML = `
+    <div style="font-size:12px;font-weight:600;color:var(--text)">${biz}</div>
+    <div style="font-size:11px;color:var(--muted);margin:2px 0">${kw}</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+      <span style="font-size:11px;color:#00c853;font-family:'DM Mono',monospace">SoLV: ${solv}%</span>
+      <span style="font-size:11px;color:var(--muted)">·</span>
+      <span style="font-size:11px;color:var(--muted);font-family:'DM Mono',monospace">Avg: ${avg}</span>
+      <span style="margin-left:auto;font-size:10px;color:var(--muted)">${now}</span>
+    </div>
+  `;
+  el.addEventListener('click', renderGrid);
+  const hist = document.getElementById('scan-history');
+  if (hist.querySelector('div[style*="text-align:center"]')) hist.innerHTML = '';
+  hist.prepend(el);
+}
+
+function renderCompetitors(bizName, mySolv) {
+  const competitors = [
+    { name: bizName, solv: mySolv, rank: Math.round(1 + (100-mySolv)/30) },
+    { name: 'The Grind Coffee Co.', solv: Math.round(Math.random()*30+20), rank: null },
+    { name: 'Brew & Bloom', solv: Math.round(Math.random()*25+10), rank: null },
+    { name: 'Morning Rush Café', solv: Math.round(Math.random()*20+5), rank: null },
+    { name: 'Café Aroma', solv: Math.round(Math.random()*15+3), rank: null },
+  ].sort((a,b) => b.solv - a.solv).map((c, i) => ({ ...c, rank: i+1 }));
+
+  const list = document.getElementById('comp-list');
+  list.innerHTML = competitors.map((c, i) => `
+    <div class="comp-item">
+      <div class="comp-rank-badge" style="background:${rankColor(Math.min(i+1, 5))};${i>=3?'color:white':''}">
+        ${c.rank}
+      </div>
+      <div class="comp-name" style="${i===0?'color:#00c853;font-weight:600':''}">
+        ${c.name}${i===0?' ★':''}
+      </div>
+      <div class="comp-solv">${c.solv}%</div>
+    </div>
+  `).join('');
+}
+
+function setTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.map-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.map-tab')[['grid','competitor','trend'].indexOf(tab)].classList.add('active');
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ── RE-RENDER ON MAP MOVE ──
+map.on('move zoom', () => {
+  if (scanResults.length > 0) renderGrid();
+});
+</script>
+</body>
+</html>
